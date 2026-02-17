@@ -1,0 +1,132 @@
+using UnityEngine;
+using UnityEngine.InputSystem;
+
+public class Player_Movement : MonoBehaviour
+{
+    [Header("Configuration")]
+    [SerializeField] private float walk_speed;
+    [SerializeField] private float acceleration_time;
+
+    [SerializeField] private AnimationCurve acceleration_curve; // Curve From Which Acceleration Is Derived
+
+    [Header("Debug")]
+    [SerializeField] private bool debug_velocities;
+    [SerializeField] private bool debug_acceleration_completion;
+
+    private Vector3 desired_velocity; // Desired Velocity Once At Full Speed
+    private Vector3 current_velocity; // Current Velocity Regardless of Desired Velocity
+
+    private Vector3 movement_input;
+    private Vector3 acceleration_elapsed_time; // Tracks time elapsed for acceleration on each axis
+    private Vector3 deceleration_elapsed_time; // Tracks time elapsed for deceleration on each axis
+
+    private PlayerInput player_input; // Player Input Component
+    private InputActionMap input_map; // Accesses Set Keybinds
+    private CharacterController char_controller; // Character Controller Component
+
+    void Awake()
+    {
+        char_controller = GetComponent<CharacterController>();
+        player_input = GetComponent<PlayerInput>();
+        input_map = player_input.currentActionMap;
+        input_map.Enable();
+
+        desired_velocity = new Vector3();
+        current_velocity = new Vector3();
+        movement_input   = new Vector3();
+        acceleration_elapsed_time = new Vector3();
+        deceleration_elapsed_time = new Vector3();
+    }
+
+    void Update()
+    {
+        HandleInput();
+        HandleMovement();
+    }
+
+    void HandleInput()
+    {
+        float input_x = input_map.FindAction("Movement").ReadValue<Vector2>().x;
+        float input_z = input_map.FindAction("Movement").ReadValue<Vector2>().y;
+
+        movement_input = new Vector3(input_x, 0, input_z).normalized; // Normalize To Prevent Faster Diagonal Movement
+    }
+    
+    void HandleMovement()
+    {
+        desired_velocity = movement_input * walk_speed;
+        
+        // Handle each axis independently (X and Z)
+        current_velocity.x = HandleAxisMovement(desired_velocity.x, current_velocity.x, 0);
+        current_velocity.z = HandleAxisMovement(desired_velocity.z, current_velocity.z, 2);
+
+        Vector3 move = transform.TransformDirection(current_velocity);
+        char_controller.Move(move * Time.deltaTime);
+
+        if(debug_velocities)
+            Debug.Log($"Velocity : {current_velocity}, Desired Velocity : {desired_velocity}");
+        if(debug_acceleration_completion)
+            Debug.Log($"Acceleration X: {(acceleration_elapsed_time.x / acceleration_time):P0}, Z: {(acceleration_elapsed_time.z / acceleration_time):P0}");
+    }
+
+    // Handles acceleration and deceleration for a single axis
+    float HandleAxisMovement(float desired, float current, int axis)
+    {
+        bool is_accelerating = desired != 0;
+        
+        if (is_accelerating)
+        {
+            // Reset deceleration time and increment acceleration time
+            if (axis == 0)
+            {
+                deceleration_elapsed_time.x = 0;
+                acceleration_elapsed_time.x += Time.deltaTime;
+                acceleration_elapsed_time.x = Mathf.Clamp(acceleration_elapsed_time.x, 0, acceleration_time);
+            }
+            else
+            {
+                deceleration_elapsed_time.z = 0;
+                acceleration_elapsed_time.z += Time.deltaTime;
+                acceleration_elapsed_time.z = Mathf.Clamp(acceleration_elapsed_time.z, 0, acceleration_time);
+            }
+            
+            // Sample curve for acceleration phase
+            float normalized_time = (axis == 0 ? acceleration_elapsed_time.x : acceleration_elapsed_time.z) / acceleration_time;
+            float curve_value = acceleration_curve.Evaluate(normalized_time);
+            
+            return Mathf.Lerp(current, desired, curve_value);
+        }
+        else
+        {
+            // Reset acceleration time and increment deceleration time
+            if (axis == 0)
+            {
+                acceleration_elapsed_time.x = 0;
+                deceleration_elapsed_time.x += Time.deltaTime;
+                deceleration_elapsed_time.x = Mathf.Clamp(deceleration_elapsed_time.x, 0, acceleration_time);
+            }
+            else
+            {
+                acceleration_elapsed_time.z = 0;
+                deceleration_elapsed_time.z += Time.deltaTime;
+                deceleration_elapsed_time.z = Mathf.Clamp(deceleration_elapsed_time.z, 0, acceleration_time);
+            }
+            
+            // Sample curve in reverse for deceleration phase
+            float normalized_time = (axis == 0 ? deceleration_elapsed_time.x : deceleration_elapsed_time.z) / acceleration_time;
+            float curve_value = acceleration_curve.Evaluate(normalized_time);
+            
+            return Mathf.Lerp(current, 0, curve_value);
+        }
+    }
+
+
+
+    /*
+        No instantaneous acceleration.
+        Interpolation Between Desired Velocity and Actual Velocity Must Be Present.
+        Interpolation Determined Through Animation Curve.
+
+
+    */
+}
